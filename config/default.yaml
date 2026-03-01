@@ -1,0 +1,51 @@
+# Crypto Trading Agents 默认配置
+
+llm:
+  provider: dashscope  # qwen/openai/anthropic
+  model: qwen-plus
+  api_key_env: DASHSCOPE_API_KEY
+  temperature: 0.3
+  max_tokens: 4096
+
+data_sources:
+  binance:
+    enabled: true
+    base_url: https://api.binance.com
+    
+  taapi:
+    enabled: false
+    api_key_env: TAAPI_API_KEY
+    base_url: https://api.taapi.io
+    
+  coindesk:
+    enabled: true
+    api_key_env: COINDESK_API_KEY
+    
+  reddit:
+    enabled: false
+    client_id_env: REDDIT_CLIENT_ID
+    client_secret_env: REDDIT_CLIENT_SECRET
+    username_env: REDDIT_USERNAME
+    password_env: REDDIT_PASSWORD
+
+analysis:
+  default_agents:
+    - market_analyst
+    - news_analyst
+    - fundamentals_analyst
+  default_depth: medium  # quick/medium/deep
+  language: zh-CN
+  enable_debate: true
+  enable_memory: false
+
+output:
+  format: markdown  # markdown/pdf/json
+  save_path: ~/.openclaw/workspace/reports/
+  log_level: INFO
+  save_history: true
+
+risk:
+  max_confidence: 100
+  min_confidence: 0
+  require_consensus: false
+  veto_enabled: false
