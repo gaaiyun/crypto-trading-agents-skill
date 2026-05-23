@@ -1,0 +1,14 @@
+# 核心：agents + orchestrator + CLI
+pandas>=1.5
+numpy>=1.21
+
+# LLM 情绪分析（可选）
+# pip install openai      # openai / deepseek backend
+# pip install anthropic   # anthropic backend
+
+# CoinGecko 数据抓取走标准库 urllib，无额外依赖
+
+# v1 legacy
+pyyaml>=6.0.0
+python-dotenv>=1.0.0
+requests>=2.28.0

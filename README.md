@@ -1,228 +1,156 @@
-# Crypto Trading Agents Skill
+# crypto-trading-agents-skill
 
-基于 [CryptoTradingAgents](https://github.com/Tomortec/CryptoTradingAgents) 框架的 OpenClaw Skill，提供多 Agent 协同的加密货币交易分析。
+加密货币多 agent 分析：技术 + 情绪（LLM 或关键词字典）+ 风控 → 一份给定币种的完整建议报告。
 
-## 🚀 快速开始
+灵感来自 [CryptoTradingAgents](https://github.com/Tomortec/CryptoTradingAgents)，但本仓库不依赖那个框架 —— 整套 agent 链路自包含、可单测、不需要 OpenClaw 平台。
 
-### 1. 安装依赖
+## v2 三层 agent 架构
 
-```bash
-cd C:\Users\gaaiy\.openclaw\workspace\skills\crypto-trading-agents
+| Agent | 输入 | 输出 |
+|---|---|---|
+| `TechnicalAgent` | 价格序列（pandas Series） | 综合分数 (-1..+1) + RSI / SMA20-50 / MACD / 布林带 z-score |
+| `SentimentAgent` | 一组新闻标题或推文 | 情绪分 (-1..+1) + 信号 (BUY/SELL/NEUTRAL) |
+| `RiskAgent` | 上面两个 agent 的输出 + 当前价 | action / 置信度 / 仓位百分比 / 止损价 / 止盈价 |
 
-# 创建虚拟环境（可选）
-python -m venv .venv
-.venv\Scripts\activate
+情绪 agent 优先用 LLM（openai / anthropic / deepseek 任一），缺 key 时**优雅退化**到关键词字典法（中英文双语词典都内置），保证离线场景下也有合理输出 —— 不像 v1 直接 hardcode `score = 0.65`。
 
-# 安装依赖
-pip install pyyaml python-dotenv requests pandas
-```
-
-### 2. 配置 API Key
+## 安装
 
 ```bash
-# 复制环境变量模板
-copy references\.env.example references\.env
-
-# 编辑 .env 文件，填入你的 API Key
-# 至少配置一个 LLM API Key（推荐 DASHSCOPE_API_KEY）
+pip install -r requirements.txt
+# 想用 LLM 情绪分析：
+pip install openai      # openai / deepseek backend
+pip install anthropic   # anthropic backend
+# 然后设 OPENAI_API_KEY / DEEPSEEK_API_KEY / ANTHROPIC_API_KEY
 ```
 
-### 3. 运行分析
+## 快速开始
 
 ```bash
-# 分析 BTC
-python scripts\run_analysis.py --ticker BTC
+# 离线 demo（合成数据 + 关键词情绪，无任何 API key）
+python __main__.py analyze BTC --synthetic
 
-# 分析 ETH，深度分析
-python scripts\run_analysis.py --ticker ETH --depth deep
+# 真实数据（CoinGecko 免费 API，无需 key）
+python __main__.py analyze ETH --days 90
 
-# 输出 JSON 格式
-python scripts\run_analysis.py --ticker SOL --output json
+# 带新闻文本（一行一条）
+python __main__.py analyze SOL --days 60 \
+    --headlines news.txt \
+    --output-format json -o report.json
 
-# 查看详细日志
-python scripts\run_analysis.py --ticker BTC -v
+# 启用 LLM 情绪分析（需要 DEEPSEEK_API_KEY）
+python __main__.py analyze BTC --days 90 \
+    --headlines news.txt --use-llm --backend deepseek
+
+# 单独抓当前价 + 24h 数据
+python __main__.py fetch BTC
+
+# 看可用 LLM backend 状态
+python __main__.py list-models
 ```
 
-## 📖 使用说明
+## 库调用
 
-### 命令行参数
+```python
+import pandas as pd
+from scripts.data_fetch import fetch_ohlcv_coingecko, fetch_recent_market_data
+from scripts.orchestrator import Orchestrator, render_markdown
+from scripts.llm_client import LLMClient
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--ticker, -t` | 加密货币代码（必需） | - |
-| `--date, -d` | 分析日期 (YYYY-MM-DD) | 今天 |
-| `--agents, -a` | Agent 团队配置 | default |
-| `--depth` | 分析深度 (quick/medium/deep) | medium |
-| `--output, -o` | 输出格式 (markdown/json/pdf) | markdown |
-| `--output-dir` | 输出目录 | ~/.openclaw/workspace/reports/ |
-| `--config` | 配置文件路径 | config/default.yaml |
-| `--non-interactive` | 非交互模式 | False |
-| `--verbose, -v` | 详细输出 | False |
+df = fetch_ohlcv_coingecko("BTC", days=90)
+snap = fetch_recent_market_data("BTC")
+df.iloc[-1, df.columns.get_loc("price")] = snap.current_price
 
-### 示例
-
-```bash
-# 快速分析 BTC
-python scripts\run_analysis.py -t BTC --depth quick
-
-# 深度分析 ETH，输出 JSON
-python scripts\run_analysis.py -t ETH --depth deep -o json
-
-# 分析多个币种（批处理）
-for ticker in BTC ETH SOL; do
-  python scripts\run_analysis.py -t $ticker
-done
+orch = Orchestrator(llm_client=LLMClient(backend="deepseek"))
+report = orch.analyze(
+    ticker="BTC",
+    prices=df["price"],
+    headlines=[
+        "Bitcoin breaks resistance",
+        "Major ETF approval expected",
+    ],
+    sentiment_weight=0.4,
+)
+print(render_markdown(report))
+print(f"决策: {report.recommendation.action} @ 置信 {report.recommendation.confidence:.0%}")
 ```
 
-## 🤖 多 Agent 架构
-
-### Agent 角色
-
-| Agent | 职责 |
-|-------|------|
-| **市场分析师** | 技术指标、价格走势、支撑阻力 |
-| **新闻分析师** | 最新加密货币新闻、政策解读 |
-| **社交媒体分析师** | Reddit/Twitter 情绪分析 |
-| **基本面分析师** | 代币经济学、团队、路线图 |
-
-### 多空辩论机制
+## 一个真实输出（mixed 信号示例）
 
 ```
-Bull Researcher → 看涨论点
-                    ↓
-Bear Researcher → 看跌论点 → Debator → Decision Maker → 最终建议
-```
+# BTC 加密分析报告
 
-## 📊 输出示例
-
-### Markdown 报告
-
-```markdown
-# BTC 分析报告 (2026-03-01)
-
-## 市场分析
-- 当前价格：$95,234
-- 24h 变化：+2.3%
-- 支撑位：$92,000
-- 阻力位：$98,000
+- 当前价格：$56,154.15
+- 数据源：synthetic
 
 ## 最终建议
-**决策**: 买入（定投）
-**置信度**: 72%
-**仓位建议**: 5-10%
-**止损位**: $88,000
+- **NEUTRAL**（置信度 52%）
+- 建议仓位：0.9%
+- 止损价：$56,154.15
+- 止盈价：$56,154.15
+
+## 技术分析
+- 信号：SELL（分数 -0.37）
+- RSI: 44.8 | SMA20: $56,336.01 | SMA50: $57,593.90
+- MACD: -630.5166 / 信号线 -463.5612
+- 布林带 z-score: -0.14
+
+## 情绪分析
+- 信号：BUY（分数 +0.67）
+- 后端：keyword
+- 输入：3 条标题
+
+## 风控理由
+- 技术面 SELL（-0.37）
+- 情绪面 BUY（+0.67），权重 0.4
+- 综合分 -0.02 → NEUTRAL
 ```
 
-### JSON 输出
+技术面看空 + 情绪面看多 → 风控**老老实实给 NEUTRAL** 而不是逼自己挑边。这是 v2 想做的事 —— 多 agent 真在打架时，把"打架"暴露给用户，别强行综合出一个假的决断。
 
-```json
-{
-  "ticker": "BTC",
-  "date": "2026-03-01",
-  "recommendation": {
-    "action": "BUY",
-    "confidence": 72,
-    "position": "5-10%",
-    "stop_loss": 88000
-  }
-}
+## 设计取舍
+
+- **数据源用 CoinGecko 免费 API**：不需要 API key，每分钟 ~50 次足够人类用。
+  生产场景可换 Binance / Kraken / Coinbase 的官方 API。
+- **TechnicalAgent 权重写死**：SMA 30% + RSI 30% + MACD 20% + 布林带 20%。这是
+  纯启发式，没有数据驱动调参。要调参建议自己继承类改 weights。
+- **SentimentAgent LLM 失败时退化关键词**：而不是 raise —— 因为分析报告里只要
+  情绪是某一项输入，没情绪也不该让整个 pipeline 崩。
+- **RiskAgent 止损止盈固定 5% / 10%**：v1 模板的做法。要按 ATR 动态调，自己继承。
+- **没接实盘下单**：本仓库只产报告。要下单接 ccxt 或 lumibot。
+
+## 项目结构
+
+```
+crypto-trading-agents-skill/
+├── __main__.py                  # CLI：analyze / fetch / list-models
+├── scripts/
+│   ├── llm_client.py            # 三 backend LLM 客户端
+│   ├── data_fetch.py            # CoinGecko + 合成数据
+│   ├── agents.py                # Technical / Sentiment / Risk 三 agent
+│   ├── orchestrator.py          # 串三个 agent + 渲染 markdown
+│   ├── run_analysis.py          # v1 legacy CLI（保留）
+│   └── trading_system.py        # v1 fake-sentiment 实现（保留对比）
+├── tests/                       # 56 个测试，全部 mock，不联网
+├── config/default.yaml
+└── requirements.txt
 ```
 
-## ⚙️ 配置说明
-
-### 配置文件 (config/default.yaml)
-
-```yaml
-llm:
-  provider: dashscope
-  model: qwen-plus
-
-analysis:
-  default_agents:
-    - market_analyst
-    - news_analyst
-    - fundamentals_analyst
-  default_depth: medium
-
-output:
-  format: markdown
-  save_path: ~/.openclaw/workspace/reports/
-```
-
-### 环境变量
+## 测试
 
 ```bash
-# LLM API Keys
-DASHSCOPE_API_KEY=sk-xxx
-OPENAI_API_KEY=sk-xxx
-
-# 数据源 API Keys
-TAAPI_API_KEY=xxx
-COINDESK_API_KEY=xxx
+pip install pytest
+pytest tests/ -v
 ```
 
-## 📁 项目结构
+56 个测试，130ms 跑完。LLM 全部 mock，CoinGecko HTTP 全部 mock，全程不联网。
 
-```
-crypto-trading-agents/
-├── SKILL.md              # OpenClaw Skill 描述
-├── README.md             # 本文档
-├── scripts/
-│   ├── run_analysis.py   # 主分析脚本
-│   └── setup_env.py      # 环境配置脚本
-├── config/
-│   ├── default.yaml      # 默认配置
-│   └── agents.yaml       # Agent 配置
-├── references/
-│   ├── .env.example      # 环境变量模板
-│   └── ...
-└── assets/
-    └── icon.png          # Skill 图标
-```
+## 已知限制
 
-## 🔧 故障排除
+- TechnicalAgent 单调上涨数据上会触发 RSI > 70 扣分 —— 这是设计意图（"涨太多了要反转"），但短期强趋势可能被误判。
+- SentimentAgent 关键词词典只有 ~40 词，复杂句式（讽刺、反问）会判错。LLM 路径更可靠但要 API key。
+- 风控里仓位计算 = max_position_pct × abs(combined_score)，没接资金管理（Kelly / 波动率适应仓位等）。
 
-### 常见问题
-
-**Q: API Key 错误**
-```
-A: 检查 references/.env 文件是否正确配置
-```
-
-**Q: 数据获取失败**
-```
-A: 检查网络连接，确认 API 服务可用
-```
-
-**Q: 依赖安装失败**
-```
-A: 确保 Python 版本 >= 3.13
-   python --version
-```
-
-### 日志位置
-
-```
-~/.openclaw/workspace/logs/crypto-agents.log
-```
-
-## 📝 免责声明
-
-⚠️ **本报告仅供参考，不构成投资建议**
-
-加密货币市场风险极高，价格波动剧烈。本工具生成的分析结果基于历史数据和公开信息，不保证准确性或完整性。
-
-请在做出任何投资决策前：
-1. 自行研究 (DYOR)
-2. 咨询专业理财顾问
-3. 只投资你能承受损失的金额
-
-## 🙏 致谢
-
-- 原项目：[CryptoTradingAgents](https://github.com/Tomortec/CryptoTradingAgents)
-- 研究论文：[arXiv 2412.20138](https://arxiv.org/pdf/2412.20138)
-- Tauric Research 团队
-
-## 📄 许可证
+## 许可
 
 Apache 2.0
